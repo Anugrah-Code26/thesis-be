@@ -2,9 +2,6 @@ package com.thesis.backend.entity.user;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
-import com.thesis.backend.entity.client.Client;
-import com.thesis.backend.entity.invoice.Invoice;
-import com.thesis.backend.entity.product.Product;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
@@ -21,7 +18,8 @@ import java.util.HashSet;
 import java.util.Set;
 
 @Entity
-@Table(name = "users", schema = "remedial")
+@Table(name = "users", schema = "thesis")
+@Inheritance(strategy = InheritanceType.JOINED)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -29,7 +27,7 @@ import java.util.Set;
 public class User {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "user_id_gen")
-    @SequenceGenerator(name = "user_id_gen", sequenceName = "user_id_seq", schema = "remedial", allocationSize = 1)
+    @SequenceGenerator(name = "user_id_gen", sequenceName = "user_id_seq", schema = "thesis", allocationSize = 1)
     private Long id;
 
     @NotNull(message = "Email is mandatory")
@@ -46,6 +44,15 @@ public class User {
     private String name;
 
     @Column
+    private String university;
+
+    @Column
+    private String faculty;
+
+    @Column
+    private String department;
+
+    @Column
     private String address;
 
     @Column(name = "phone_number")
@@ -58,10 +65,32 @@ public class User {
     private String verificationToken;
 
     @Column(name = "verification_token_expiry")
-    private LocalDateTime verificationTokenExpiry;
+    private OffsetDateTime verificationTokenExpiry;
 
-    @Column(nullable = false)
-    private Boolean deleted = false;
+    @Transient
+    public Set<Role> getRoles() {
+        Set<Role> roles = new HashSet<>();
+        for (UserRole userRole : userRoles) {
+            roles.add(userRole.getRole());
+        }
+        return roles;
+    }
+
+    public void addRole(Role role) {
+        UserRole userRole = new UserRole();
+        userRole.setUser(this);
+        userRole.setRole(role);
+        userRoles.add(userRole);
+    }
+
+    public void removeRole(Role role) {
+        userRoles.stream()
+                .filter(ur -> ur.getRole().equals(role))
+                .findFirst().ifPresent(userRole -> userRoles.remove(userRole));
+    }
+
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
 
     @NotNull
     @ColumnDefault("CURRENT_TIMESTAMP")
@@ -84,21 +113,14 @@ public class User {
         updatedAt = OffsetDateTime.now();
     }
 
+    @PreRemove
+    protected void onRemove() {
+        deletedAt = OffsetDateTime.now();
+    }
+
     // Relationships
     @JsonBackReference
-    @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
-    @JoinTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"), inverseJoinColumns = @JoinColumn(name = "role_id"))
-    private Set<Role> roles = new HashSet<>();
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<UserRole> userRoles = new HashSet<>();
 
-    @JsonManagedReference
-    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private Set<Client> clients = new HashSet<>();
-
-    @JsonManagedReference
-    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private Set<Product> products = new HashSet<>();
-
-    @JsonManagedReference
-    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    private Set<Invoice> invoices = new HashSet<>();
 }

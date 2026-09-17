@@ -36,7 +36,7 @@ public class TokenGenerationServiceImpl implements TokenGenerationService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new DataNotFoundException("User not found"));
 
-        String role = authentication.getAuthorities().stream()
+        String roles = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .reduce((a, b) -> a + " " + b)
                 .orElse("");
@@ -45,7 +45,7 @@ public class TokenGenerationServiceImpl implements TokenGenerationService {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(expiry))
                 .subject(email)
-                .claim("role", role)
+                .claim("roles", roles)
                 .claim("userId", user.getId())
                 .claim("type", tokenType.name())
                 .build();
@@ -63,7 +63,7 @@ public class TokenGenerationServiceImpl implements TokenGenerationService {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(ACCESS_TOKEN_EXPIRY))
                 .subject(jwt.getSubject())
-                .claim("scope", jwt.getClaimAsString("scope"))
+                .claim("roles", jwt.getClaimAsString("roles"))
                 .claim("userId", jwt.getClaimAsString("userId"))
                 .claim("type", TokenType.ACCESS.name())
                 .build();

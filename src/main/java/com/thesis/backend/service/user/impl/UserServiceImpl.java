@@ -2,8 +2,7 @@ package com.thesis.backend.service.user.impl;
 
 import com.auth0.jwt.exceptions.TokenExpiredException;
 import com.thesis.backend.common.exceptions.DataNotFoundException;
-import com.thesis.backend.entity.user.Role;
-import com.thesis.backend.entity.user.User;
+import com.thesis.backend.entity.user.*;
 import com.thesis.backend.infrastructure.user.dto.EmailRequestDTO;
 import com.thesis.backend.infrastructure.user.dto.UserDTO;
 import com.thesis.backend.infrastructure.user.dto.UserProfileDTO;
@@ -19,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,7 +44,7 @@ public class UserServiceImpl implements UserService {
         User user = new User();
         user.setEmail(req.getEmail());
         user.setVerificationToken(token);
-        user.setVerificationTokenExpiry(LocalDateTime.now().plusHours(24));
+        user.setVerificationTokenExpiry(OffsetDateTime.now().plusHours(24));
 
         String link = frontendUrl + "/verify?verificationToken=" + token;
         emailService.sendVerificationEmail(req.getEmail(), link);
@@ -58,14 +58,14 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findByVerificationToken(token)
                 .orElseThrow(() -> new RuntimeException("Invalid token"));
 
-        if (user.getVerificationTokenExpiry().isBefore(LocalDateTime.now())) {
+        if (user.getVerificationTokenExpiry().isBefore(OffsetDateTime.now())) {
             throw new TokenExpiredException("Token expired!");
         }
 
         user.setName(req.getName());
-        user.setPassword(passwordEncoder.encode(req.getPassword()));
-        user.setPhoneNumber(req.getPhoneNumber());
-        user.setAddress(req.getAddress());
+//        user.setPassword(passwordEncoder.encode(req.getPassword()));
+//        user.setPhoneNumber(req.getPhoneNumber());
+//        user.setAddress(req.getAddress());
         user.setEmailVerified(true);
 
         Optional<Role> defaultRole = roleRepository.findByName("ADMIN");
@@ -116,16 +116,26 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public UserProfileDTO updateUserProfile(Long userId, UserProfileDTO userProfileDTO) {
+    public UserProfileDTO updateUserProfile(Long userId, UserProfileDTO dto) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new DataNotFoundException("User not found"));
 
-        user.setName(userProfileDTO.getName());
-        user.setEmail(userProfileDTO.getEmail());
-        user.setPhoneNumber(userProfileDTO.getPhoneNumber());
-        user.setAddress(userProfileDTO.getAddress());
+        // Common fields
+        user.setName(dto.getName());
+        user.setEmail(dto.getEmail());
 
-        return UserProfileDTO.fromEntity(userRepository.save(user));
+        // Update subclass-specific fields
+        if (user instanceof Student student) {
+            student.setUniqueId(dto.getUniqueId());
+        }
+        else if (user instanceof Lecturer lecturer) {
+            lecturer.setUniqueId(dto.getUniqueId());
+        }
+
+        // Save updated user
+        User savedUser = userRepository.save(user);
+        return UserProfileDTO.fromEntity(savedUser);
     }
+
 
 }

@@ -1,5 +1,6 @@
 package com.thesis.backend.infrastructure.config;
 
+import com.thesis.backend.entity.user.RoleType;
 import com.thesis.backend.infrastructure.auth.filters.TokenBlacklist;
 import com.thesis.backend.service.auth.GetUserAuthDetailsService;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
@@ -17,13 +18,18 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.*;
-import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSecurity
@@ -63,36 +69,54 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         // Public endpoints
                         .requestMatchers("/error/**").permitAll()
-                        .requestMatchers("/api/v1/user/register/**").permitAll()
+//                        .requestMatchers("/api/v1/user/register/**").permitAll()
+//                        .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/api/v1/auth/login").permitAll()
-                        .requestMatchers("/api/v1/invoices/process-overdue").permitAll()
-                        .requestMatchers("/api/v1/invoices/process-recurring").permitAll()
-//                        .requestMatchers("/api/v1/user/**").permitAll()
+                        .requestMatchers("/api/v1/lecturers").permitAll()
 
-                        // Allow static files
+                        // Secured endpoints
+                        .requestMatchers("/api/v1/lecturers/**").hasAnyAuthority(
+                                RoleType.ADMIN,
+                                RoleType.STUDENT,
+                                RoleType.SUPERVISOR,
+                                RoleType.EXAMINER)
+                        .requestMatchers("/api/v1/theses/**").hasAnyAuthority(
+                                RoleType.ADMIN,
+                                RoleType.STUDENT,
+                                RoleType.SUPERVISOR,
+                                RoleType.EXAMINER)
+                        .requestMatchers("/api/v1/exams/**").hasAnyAuthority(
+                                RoleType.ADMIN,
+                                RoleType.STUDENT,
+                                RoleType.SUPERVISOR,
+                                RoleType.EXAMINER)
+                        .requestMatchers("/api/v1/thesis/exams/**").hasAnyAuthority(
+                                RoleType.ADMIN,
+                                RoleType.STUDENT,
+                                RoleType.SUPERVISOR,
+                                RoleType.EXAMINER)
+                        .requestMatchers("/api/v1/reports/**").hasAuthority(RoleType.ADMIN)
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .oauth2ResourceServer(oauth2 -> {
-                    oauth2.jwt(jwt -> jwt.decoder(jwtDecoder()));
-                    oauth2.bearerTokenResolver(request -> {
-                        Cookie[] cookies = request.getCookies();
-                        if (cookies != null) {
-                            for (Cookie cookie : cookies) {
-                                if (cookie.getName().equals("SID")) {
-                                    return cookie.getValue();
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> {
+                            jwt.decoder(jwtDecoder());
+                            jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()); // ✅ FIXED
+                        })
+                        .bearerTokenResolver(request -> {
+                            // ✅ Get token from cookie first
+                            if (request.getCookies() != null) {
+                                for (Cookie cookie : request.getCookies()) {
+                                    if ("SID".equals(cookie.getName())) {
+                                        return cookie.getValue();
+                                    }
                                 }
                             }
-                        }
-
-                        // Get from headers instead of cookies
-                        var header = request.getHeader("Authorization");
-                        if (header != null) {
-                            return header.replace("Bearer ", "");
-                        }
-
-                        return null;
-                    });
-                })
+                            // ✅ Fallback to Authorization header
+                            String header = request.getHeader("Authorization");
+                            return header != null ? header.replace("Bearer ", "") : null;
+                        })
+                )
                 .addFilterAfter(tokenBlacklistFilter, BearerTokenAuthenticationFilter.class)
                 .userDetailsService(getUserAuthDetailsService)
                 .build();
@@ -100,14 +124,33 @@ public class SecurityConfig {
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        SecretKey originalKey = new SecretKeySpec(jwtConfigProperties.getSecret().getBytes(), "HmacSHA256");
-        return NimbusJwtDecoder.withSecretKey(originalKey).build();
+        SecretKey key = new SecretKeySpec(jwtConfigProperties.getSecret().getBytes(), "HmacSHA256");
+        return NimbusJwtDecoder.withSecretKey(key).build();
     }
 
     @Bean
     public JwtEncoder jwtEncoder() {
         SecretKey key = new SecretKeySpec(jwtConfigProperties.getSecret().getBytes(), "HmacSHA256");
-        JWKSource<SecurityContext> immutableSecret = new ImmutableSecret<SecurityContext>(key);
+        JWKSource<SecurityContext> immutableSecret = new ImmutableSecret<>(key);
         return new NimbusJwtEncoder(immutableSecret);
+    }
+
+    // ✅ Custom converter to map "roles" claim to authorities
+    @Bean
+    public JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Object rolesClaim = jwt.getClaim("roles");
+            if (rolesClaim == null) return List.of();
+
+            String roles = rolesClaim.toString(); // e.g. "STUDENT" or "ADMIN,SUPERVISOR"
+            log.info("Extracted roles from JWT: " + roles);
+
+            return Arrays.stream(roles.split(","))
+                    .map(String::trim)
+                    .map(SimpleGrantedAuthority::new) // ✅ matches hasAuthority()
+                    .collect(Collectors.toList());
+        });
+        return converter;
     }
 }

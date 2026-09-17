@@ -14,7 +14,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 @Entity
-@Table(name = "roles", schema = "remedial")
+@Table(name = "roles", schema = "thesis")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -22,7 +22,7 @@ import java.util.Set;
 public class Role {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "role_id_gen")
-    @SequenceGenerator(name = "role_id_gen", sequenceName = "role_id_seq", schema = "remedial", allocationSize = 1)
+    @SequenceGenerator(name = "role_id_gen", sequenceName = "role_id_seq", schema = "thesis", allocationSize = 1)
     @Column(name = "role_id", nullable = false)
     private Long id;
 
@@ -53,4 +53,14 @@ public class Role {
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now();
     }
+
+    @PreRemove
+    protected void onRemove() {
+        deletedAt = OffsetDateTime.now();
+    }
+
+    // Relationships
+    @JsonManagedReference
+    @OneToMany(mappedBy = "role", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    private Set<UserRole> userRoles = new HashSet<>();
 }
